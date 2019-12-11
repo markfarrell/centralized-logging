@@ -1,0 +1,22 @@
+{
+  "name": "isec2077-final-project",
+  "version": "1.0.0",
+  "description": "",
+  "main": "index.js",
+  "directories": {
+    "test": "test"
+  },
+  "scripts": {
+    "test": "echo \"Error: no test specified\" && exit 1"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/markfarrell/isec2077-final-project.git"
+  },
+  "author": "",
+  "license": "ISC",
+  "bugs": {
+    "url": "https://github.com/markfarrell/isec2077-final-project/issues"
+  },
+  "homepage": "https://github.com/markfarrell/isec2077-final-project#readme"
+}
