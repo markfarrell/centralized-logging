@@ -1,3 +1,5 @@
+#TYPE System.Diagnostics.EventLogEntry#Security/Microsoft-Windows-Security-Auditing/4688
+"EventID","MachineName","Data","Index","Category","CategoryNumber","EntryType","Message","Source","ReplacementStrings","InstanceId","TimeGenerated","TimeWritten","UserName","Site","Container"
 "4688","ISEC2077-VM01.isec2077.ca","System.Byte[]","54669","(13312)","13312","SuccessAudit","A new process has been created.
 
 Creator Subject:

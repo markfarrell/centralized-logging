@@ -17,6 +17,7 @@ import Effect.Console (log) as Console
 import Effect.Class (liftEffect)
 
 import Data.Traversable(foldMap)
+import Data.Tuple (Tuple(..))
 import Data.List(many)
 import Data.String.CodeUnits (singleton)
 
@@ -28,6 +29,7 @@ import HTTP as HTTP
 import SQLite3 as SQLite3
 
 import Linux as Linux
+import Windows as Windows
 
 foreign import decodeURI :: String -> String
 
@@ -72,10 +74,20 @@ insertMessage filename (Message ty id msg) = do
   lift $ pure unit
   where query = "INSERT INTO Messages(type,id,msg) VALUES ('" <> show ty <> "','" <> show id  <> "','" <> msg <> "')" 
 
-data Route = InsertLinux Linux.Entry
+insertWindows :: String -> Windows.Entry -> DB.Request Unit
+insertWindows filename (Windows.Entry entry) = do
+  database <- DB.connect filename SQLite3.OpenReadWrite
+  _ <- DB.all query database
+  _ <- DB.close database
+  lift $ pure unit
+  where query = Windows.entryQuery (Windows.Entry entry)
+
+
+data Route = InsertLinux Linux.Entry | InsertWindows Windows.Entry
  
 instance showRoute :: Show Route where
   show (InsertLinux entry) = "InsertLinux (" <> show entry <> ")"
+  show (InsertWindows entry) = "InsertWindows (" <> show entry <> ")"
 
 parseMessageType :: Parser String MessageType
 parseMessageType = do
@@ -111,8 +123,17 @@ parseInsertLinux = do
   entry <- Linux.parseEntry
   pure (InsertLinux entry)
 
+parseInsertWindows :: Parser String Route
+parseInsertWindows = do
+  _ <- string "/insert/windows"
+  _ <- string "?"
+  _ <- string "entry"
+  _ <- string "="
+  entry <- Windows.parseEntry
+  pure (InsertWindows entry)
+
 parseRoute :: Parser String Route
-parseRoute = parseInsertLinux
+parseRoute = parseInsertLinux <|> parseInsertWindows
 
 data ContentType a = TextHTML a
 
@@ -133,15 +154,25 @@ runRoute req  = do
     (Left _)                    -> pure $ BadRequest (HTTP.messageURL req)
     (Right (InsertLinux entry)) -> do
       pure $ Ok (TextHTML (InsertLinux entry))
+    (Right (InsertWindows entry)) -> do
+      result' <- DB.runRequest $ insertWindows filename entry
+      case result' of
+        (Left error)             -> do 
+           _ <- audit $ Message Failure DatabaseRequest (show error) 
+           pure $ InternalServerError $ (InsertWindows  entry)
+        (Right (Tuple rows steps)) -> do
+           _ <- audit $ Message Success DatabaseRequest (show steps) 
+           pure $ Ok (TextHTML (InsertWindows entry))
+      where filename = "logs.db"
  
 respondRoute :: ResponseType Route -> HTTP.ServerResponse -> Aff Unit
-respondRoute (Ok (TextHTML (InsertLinux entry))) = \res -> liftEffect $ do
+respondRoute (Ok (TextHTML _)) = \res -> liftEffect $ do
   _ <- HTTP.setHeader "Content-Type" "text/html" $ res
   _ <- HTTP.writeHead 200 $ res
   _ <- HTTP.write body $ res
   _ <- HTTP.end $ res
   pure unit
-  where body = show (InsertLinux entry)
+  where body = ""
 respondRoute (BadRequest _) = \res -> liftEffect $ do
   _ <- HTTP.writeHead 400 $ res
   _ <- HTTP.end $ res

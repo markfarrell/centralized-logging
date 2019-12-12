@@ -1,5 +1,5 @@
 module Windows
-  ( Entry
+  ( Entry(..)
   , parseEntry
   , entryQuery
   ) where
@@ -31,6 +31,9 @@ newtype Entry = Entry
   , site :: String
   , container :: String
   } 
+
+instance showEntry :: Show Entry where
+  show (Entry entry) = "(Entry " <> show entry <> ")"
 
 parseValue :: Parser String String
 parseValue = foldMap singleton <$> many (satisfy $ not <<< eq ',')
@@ -88,7 +91,6 @@ parseEntry = do
     }
   
 entryQuery :: Entry -> String
-entryQuery (Entry entry) = "INSERT INTO Windows (EventID, MachineName, EntryData, EntryIndex, Category, CategoryNumber, EntryType, Message, Source, ReplacementStrings, InstanceID, TimeGenerated, TimeWritten, UserName, Site, Container" <> " " <> "VALUES" <> " " <> "(" <> values <> ")"
-  where values = entry.eventID <> "," <> entry.machineName <> "," <> entry.entryData <> "," <> entry.category <> "," <> entry.categoryNumber <> "," <> entry.entryType <> "," <> entry.message
-          <> entry.source <> "," <> entry.replacementStrings <> "," <> entry.instanceID <> "," <> entry.timeGenerated <> "," <> entry.timeWritten <> "," <> entry.userName <> ","
-          <> entry.userName <> "," <>  entry.site <> "," <> entry.container
+entryQuery (Entry entry) = "INSERT INTO Windows (EventID, MachineName, EntryData, EntryIndex, Category, CategoryNumber, EntryType, Message, Source, ReplacementStrings, InstanceID, TimeGenerated, TimeWritten, UserName, Site, Container)" <> " " <> "VALUES" <> " " <> "(" <> values <> ")"
+  where values = "'" <> entry.eventID <> "','" <> entry.machineName <> "','" <> entry.entryData <> "','" <> entry.category <> "','" <> entry.categoryNumber <> "','" <> entry.entryType <> "','" <> entry.message <> "','" <> entry.source <> "','" <> entry.replacementStrings <> "','" <> entry.instanceID <> "','" <> entry.timeGenerated <> "','" <> entry.timeWritten <> "','" <> entry.userName <> "','"
+          <> entry.userName <> "','" <>  entry.site <> "','" <> entry.container <> "'"
