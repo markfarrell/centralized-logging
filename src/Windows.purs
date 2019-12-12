@@ -1,5 +1,7 @@
 module Windows
   ( Entry
+  , parseEntry
+  , entryQuery
   ) where
 
 import Prelude
@@ -85,3 +87,8 @@ parseEntry = do
     , container : container
     }
   
+entryQuery :: Entry -> String
+entryQuery (Entry entry) = "INSERT INTO Windows (EventID, MachineName, EntryData, EntryIndex, Category, CategoryNumber, EntryType, Message, Source, ReplacementStrings, InstanceID, TimeGenerated, TimeWritten, UserName, Site, Container" <> " " <> "VALUES" <> " " <> "(" <> values <> ")"
+  where values = entry.eventID <> "," <> entry.machineName <> "," <> entry.entryData <> "," <> entry.category <> "," <> entry.categoryNumber <> "," <> entry.entryType <> "," <> entry.message
+          <> entry.source <> "," <> entry.replacementStrings <> "," <> entry.instanceID <> "," <> entry.timeGenerated <> "," <> entry.timeWritten <> "," <> entry.userName <> ","
+          <> entry.userName <> "," <>  entry.site <> "," <> entry.container
