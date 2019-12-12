@@ -10,7 +10,6 @@ import Control.Monad.Rec.Class (forever)
 import Control.Monad.Trans.Class (lift)
 
 import Data.Either(Either(..))
-import Data.Tuple(Tuple(..))
 
 import Effect (Effect)
 import Effect.Aff (Aff, launchAff)
@@ -27,6 +26,8 @@ import Text.Parsing.Parser.String (string, anyChar)
 import DB as DB
 import HTTP as HTTP
 import SQLite3 as SQLite3
+
+import Linux as Linux
 
 foreign import decodeURI :: String -> String
 
@@ -57,7 +58,6 @@ log = liftEffect <<< Console.log
 
 audit :: Message -> Aff Unit
 audit message = do
-  _ <- DB.runRequest $ insertMessage filename (encodeMessage message)
   _ <- log $ show message
   pure unit
   where
@@ -72,10 +72,10 @@ insertMessage filename (Message ty id msg) = do
   lift $ pure unit
   where query = "INSERT INTO Messages(type,id,msg) VALUES ('" <> show ty <> "','" <> show id  <> "','" <> msg <> "')" 
 
-data Route = InsertMessage Message
+data Route = InsertLinux Linux.Entry
  
 instance showRoute :: Show Route where
-  show (InsertMessage message) = "InsertMessage (" <> show message <> ")"
+  show (InsertLinux entry) = "InsertLinux (" <> show entry <> ")"
 
 parseMessageType :: Parser String MessageType
 parseMessageType = do
@@ -96,30 +96,21 @@ parseMessageID = do
     parseRouteRequest = string (show RouteRequest) >>= const (pure RouteRequest)
     parseRouteResponse = string (show RouteResponse) >>= const (pure RouteResponse)
 
-parseMessageString :: Parser String String
-parseMessageString = do
-  _ <- string "msg"
+parseEntryString :: Parser String String
+parseEntryString = do
+  _ <- string "entry"
   _ <- string "="
   foldMap singleton <$> many anyChar
 
-parseMessageQuery :: Parser String Message
-parseMessageQuery = do
-  ty <- parseMessageType
-  _ <- string "&"
-  id <- parseMessageID
-  _ <- string "&"
-  msg <- decodeURIComponent <$> parseMessageString
-  pure $ Message ty id msg
-
-parseInsertMessage :: Parser String Route
-parseInsertMessage = do
-  _ <- string "/insert/message"
+parseInsertLinux :: Parser String Route
+parseInsertLinux = do
+  _ <- string "/insert/linux"
   _ <- string "?"
-  message <- parseMessageQuery
-  pure (InsertMessage message)
+  entry <- Linux.parseEntry
+  pure (InsertLinux entry)
 
 parseRoute :: Parser String Route
-parseRoute = parseInsertMessage
+parseRoute = parseInsertLinux
 
 data ContentType a = TextHTML a
 
@@ -135,28 +126,20 @@ instance showResponseType :: (Show a) => Show (ResponseType a) where
 
 runRoute :: HTTP.IncomingMessage -> Aff (ResponseType Route)
 runRoute req  = do
-  result <-  pure $ flip runParser parseRoute (HTTP.messageURL req) 
+  result <-  pure $ flip runParser parseRoute (decodeURIComponent $ HTTP.messageURL req) 
   case result of
-    (Left _)                        -> pure $ BadRequest (HTTP.messageURL req)
-    (Right (InsertMessage message)) -> do
-      result' <- DB.runRequest $ insertMessage filename message
-      case result' of
-        (Left error)             -> do 
-           _ <- audit $ Message Failure DatabaseRequest (show error) 
-           pure $ InternalServerError $ (InsertMessage message)
-        (Right (Tuple rows steps)) -> do
-           _ <- audit $ Message Success DatabaseRequest (show steps) 
-           pure $ Ok (TextHTML (InsertMessage message))
-  where filename = "log.db"
+    (Left _)                    -> pure $ BadRequest (HTTP.messageURL req)
+    (Right (InsertLinux entry)) -> do
+      pure $ Ok (TextHTML (InsertLinux entry))
  
 respondRoute :: ResponseType Route -> HTTP.ServerResponse -> Aff Unit
-respondRoute (Ok (TextHTML (InsertMessage message))) = \res -> liftEffect $ do
+respondRoute (Ok (TextHTML (InsertLinux entry))) = \res -> liftEffect $ do
   _ <- HTTP.setHeader "Content-Type" "text/html" $ res
   _ <- HTTP.writeHead 200 $ res
   _ <- HTTP.write body $ res
   _ <- HTTP.end $ res
   pure unit
-  where body = show (InsertMessage message)
+  where body = show (InsertLinux entry)
 respondRoute (BadRequest _) = \res -> liftEffect $ do
   _ <- HTTP.writeHead 400 $ res
   _ <- HTTP.end $ res
