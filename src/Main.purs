@@ -7,10 +7,11 @@ import Effect (Effect)
 import Effect.Console (log)
 
 import Data.Traversable(foldMap)
-import Data.List(many)
+import Data.List(List, many)
 import Data.String.CodeUnits (singleton)
 
-import Text.Parsing.Parser (Parser)
+import Text.Parsing.Parser (Parser, runParser)
+import Text.Parsing.Parser.Combinators(sepBy)
 import Text.Parsing.Parser.String (string, satisfy)
 
 data Field =
@@ -42,7 +43,6 @@ data Field =
   | Items String
   | Kernel String
   | Key String
-  | Msg String
   | NewLevel String
   | Old String
   | OldAuid String
@@ -62,9 +62,59 @@ data Field =
   | Table String
   | Terminal String
   | Tty String
-  | Type String
   | Uid String
   | Ver String
+
+instance showField :: Show Field where
+  show (A0 v) = "(A0 " <> show v <> ")"
+  show (A1 v) = "(A1 " <> show v <> ")"
+  show (A2 v) = "(A2 " <> show v <> ")"
+  show (A3 v) = "(A3 " <> show v <> ")"
+  show (Acct v) = "(Acct " <> show v <> ")"
+  show (Addr v) = "(Addr " <> show v <> ")"
+  show (Arch v) = "(Arch " <> show v <> ")"
+  show (AuditBacklogLimit v) = "(AuditBacklogLimit " <> show v <> ")"
+  show (AuditFailure v) = "(AuditFailure " <> show v <> ")"
+  show (Auid v) = "(Auid " <> show v <> ")"
+  show (Cmd v) = "(Cmd " <> show v <> ")"
+  show (Comm v) = "(Comm " <> show v <> ")"
+  show (Dev v) = "(Dev " <> show v <> ")"
+  show (Egid v) = "(Egid " <> show v <> ")"
+  show (Entries v) = "(Entries " <> show v <> ")"
+  show (Euid v) = "(Euid " <> show v <> ")"
+  show (Exe v) = "(Exe " <> show v <> ")"
+  show (Exit v) = "(Exit " <> show v <> ")"
+  show (Family v) = "(Family " <> show v <> ")"
+  show (Format v) = "(Format " <> show v <> ")"
+  show (Fsgid v) = "(Fsgid " <> show v <> ")"
+  show (Fsuid v) = "(Fsuid " <> show v <> ")"
+  show (Gid v) = "(Gid " <> show v <> ")"
+  show (Grantors v) = "(Grantors " <> show v <> ")"
+  show (Hostname v) = "(Hostname " <> show v <> ")"
+  show (Items v) = "(Items " <> show v <> ")"
+  show (Kernel v) = "(Kernel " <> show v <> ")"
+  show (Key v) = "(Key " <> show v <> ")"
+  show (NewLevel v) = "(NewLevel " <> show v <> ")"
+  show (Old v) = "(Old " <> show v <> ")"
+  show (OldAuid v) = "(OldAuid " <> show v <> ")"
+  show (OldSes v) = "(OldSes " <> show v <> ")"
+  show (OldProm v) = "(OldProm " <> show v <> ")"
+  show (Op v) = "(Op " <> show v <> ")"
+  show (Pid v) = "(Pid " <> show v <> ")"
+  show (Ppid v) = "(Ppid " <> show v <> ")"
+  show (Proctitle v) = "(Proctitle " <> show v <> ")"
+  show (Prom v) = "(Prom " <> show v <> ")"
+  show (Res v) = "(Res " <> show v <> ")"
+  show (Ses v) = "(Ses " <> show v <> ")"
+  show (Sgid v) = "(Sgid " <> show v <> ")"
+  show (Success v) = "(Success " <> show v <> ")"
+  show (Suid v) = "(Suid " <> show v <> ")"
+  show (Syscall v) = "(Syscall " <> show v <> ")"
+  show (Table v) = "(Table " <> show v <> ")"
+  show (Terminal v) = "(Terminal " <> show v <> ")"
+  show (Tty v) = "(Tty " <> show v <> ")"
+  show (Uid v) = "(Uid " <> show v <> ")"
+  show (Ver v) = "(Ver " <> show v <> ")"
 
 parseValue :: Parser String String
 parseValue = foldMap singleton <$> many (satisfy $ not <<< eq ' ')
@@ -265,13 +315,6 @@ parseKey = do
   v <- parseValue
   pure (Key v)
 
-parseMsg :: Parser String Field
-parseMsg = do
-  _ <- string "msg"
-  _ <- string "="
-  v <- parseValue
-  pure (Msg v)
-
 parseNewLevel :: Parser String Field
 parseNewLevel = do
   _ <- string "new-level"
@@ -405,13 +448,6 @@ parseTty = do
   v <- parseValue
   pure (Tty v)
 
-parseType :: Parser String Field
-parseType = do
-  _ <- string "type"
-  _ <- string "="
-  v <- parseValue
-  pure (Type v)
-
 parseUid :: Parser String Field
 parseUid = do
   _ <- string "uid"
@@ -455,7 +491,6 @@ parseField = parseA0
   <|> parseItems
   <|> parseKernel
   <|> parseKey
-  <|> parseMsg
   <|> parseNewLevel
   <|> parseOld
   <|> parseOldAuid
@@ -475,10 +510,55 @@ parseField = parseA0
   <|> parseTable
   <|> parseTerminal
   <|> parseTty
-  <|> parseType
   <|> parseUid
   <|> parseVer
 
+parseFields :: Parser String (List Field)
+parseFields = parseField `sepBy` string " "
+
+parseMessageType :: Parser String MessageType
+parseMessageType = do
+  _  <- string "type"
+  _  <- string "="
+  ty <- parseDaemonStart
+  pure ty
+  where 
+    parseDaemonStart = do
+       _ <- string "DAEMON_START" 
+       pure DaemonStart
+
+parseMessage :: Parser String Message
+parseMessage = do
+  _  <- string "msg"
+  _  <- string "="
+  v  <- parseValue
+  pure (Message v)
+
+data MessageType = DaemonStart
+
+newtype Message = Message String
+
+data Entry = Entry MessageType Message (List Field)
+
+instance showMessageType :: Show MessageType where
+  show (DaemonStart) = "(DaemonStart)"
+
+instance showMessage :: Show Message where
+  show (Message x) = "(Message " <> show x <> ")"
+
+instance showEntry :: Show Entry where
+  show (Entry ty msg fields) = "(Entry " <> show ty <> " " <> show msg <> " " <> show fields <> ")"
+
+parseEntry :: Parser String Entry
+parseEntry = do
+  ty     <- parseMessageType
+  _      <- string " "
+  msg    <- parseMessage
+  _      <- string " "
+  fields <- parseFields
+  pure $ Entry ty msg fields 
+
 main :: Effect Unit
 main = do
-  log "Hello sailor!"
+  log $ show $ runParser entry parseEntry
+  where entry="type=DAEMON_START msg=audit(1575912248.984:3695): op=start ver=2.8.5 format=raw kernel=3.10.0-1062.1.2.el7.x86_64 auid=4294967295 pid=705 uid=0 ses=4294967295 res=success"
