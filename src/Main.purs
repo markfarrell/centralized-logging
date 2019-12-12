@@ -106,6 +106,8 @@ parseInsertLinux :: Parser String Route
 parseInsertLinux = do
   _ <- string "/insert/linux"
   _ <- string "?"
+  _ <- string "entry"
+  _ <- string "="
   entry <- Linux.parseEntry
   pure (InsertLinux entry)
 
