@@ -16,8 +16,9 @@ import Effect.Aff (Aff, launchAff)
 import Effect.Console (log) as Console
 import Effect.Class (liftEffect)
 
-import Data.Traversable(foldMap)
-import Data.Tuple (Tuple(..))
+import Data.Foldable (fold)
+import Data.Traversable(foldMap, sequence)
+import Data.Tuple (Tuple(..), snd)
 import Data.List(many)
 import Data.String.CodeUnits (singleton)
 
@@ -81,6 +82,16 @@ insertWindows filename (Windows.Entry entry) = do
   _ <- DB.close database
   lift $ pure unit
   where query = Windows.entryQuery (Windows.Entry entry)
+
+insertLinux' :: String -> String -> DB.Request Unit
+insertLinux' filename query = do
+  database <- DB.connect filename SQLite3.OpenReadWrite
+  _ <- DB.all query database
+  _ <- DB.close database
+  lift $ pure unit
+
+insertLinux :: String -> Linux.Entry -> Array (DB.Request Unit)
+insertLinux filename entry = insertLinux' filename <$> Linux.entryQueries entry
 
 data Route = InsertLinux Linux.Entry | InsertWindows Windows.Entry
  
@@ -152,7 +163,15 @@ runRoute req  = do
   case result of
     (Left _)                    -> pure $ BadRequest (HTTP.messageURL req)
     (Right (InsertLinux entry)) -> do
-      pure $ Ok (TextHTML (InsertLinux entry))
+      result' <- sequence <$> sequence (DB.runRequest <$> insertLinux filename entry)
+      case result' of
+        (Left error)             -> do 
+           _ <- audit $ Message Failure DatabaseRequest (show error) 
+           pure $ InternalServerError $ (InsertLinux  entry)
+        (Right result'') -> do
+           steps <- pure $ fold (snd <$> result'')
+           _     <- audit $ Message Success DatabaseRequest (show steps) 
+           pure $ Ok (TextHTML (InsertLinux entry))
     (Right (InsertWindows entry)) -> do
       result' <- DB.runRequest $ insertWindows filename entry
       case result' of
@@ -162,7 +181,7 @@ runRoute req  = do
         (Right (Tuple rows steps)) -> do
            _ <- audit $ Message Success DatabaseRequest (show steps) 
            pure $ Ok (TextHTML (InsertWindows entry))
-      where filename = "logs.db"
+  where filename = "logs.db"
  
 respondRoute :: ResponseType Route -> HTTP.ServerResponse -> Aff Unit
 respondRoute (Ok (TextHTML _)) = \res -> liftEffect $ do
