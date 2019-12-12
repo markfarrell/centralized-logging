@@ -7,7 +7,7 @@ function fields_in_lines() {
 		do 
 			IFS=" "
 			param=($(echo $column | tr "=" " "))
-			echo "${param[0]}"
+			echo "${param[0]} TEXT NOT NULL"
 		done
 	done
 	IFS=""

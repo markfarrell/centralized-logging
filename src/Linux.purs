@@ -1,4 +1,10 @@
-module Main where
+module Linux
+ ( Field
+ , Entry
+ , Message
+ , MessageType
+ , parseEntry 
+ )  where
 
 import Prelude
 
@@ -6,6 +12,7 @@ import Control.Alternative ((<|>))
 import Effect (Effect)
 import Effect.Console (log)
 
+import Data.Array (fromFoldable) as Array
 import Data.Traversable(foldMap)
 import Data.List(List, many)
 import Data.String.CodeUnits (singleton)
@@ -538,7 +545,7 @@ data MessageType = DaemonStart
 
 newtype Message = Message String
 
-data Entry = Entry MessageType Message (List Field)
+data Entry = Entry MessageType Message (Array Field)
 
 instance showMessageType :: Show MessageType where
   show (DaemonStart) = "(DaemonStart)"
@@ -555,10 +562,14 @@ parseEntry = do
   _      <- string " "
   msg    <- parseMessage
   _      <- string " "
-  fields <- parseFields
+  fields <- Array.fromFoldable <$> parseFields
   pure $ Entry ty msg fields 
 
-main :: Effect Unit
-main = do
-  log $ show $ runParser entry parseEntry
-  where entry="type=DAEMON_START msg=audit(1575912248.984:3695): op=start ver=2.8.5 format=raw kernel=3.10.0-1062.1.2.el7.x86_64 auid=4294967295 pid=705 uid=0 ses=4294967295 res=success"
+test :: Effect Unit
+test = do
+  check <- pure $ runParser entry parseEntry
+  log $ show $ (show check) == expect
+  where 
+    entry="type=DAEMON_START msg=audit(1575912248.984:3695): op=start ver=2.8.5 format=raw kernel=3.10.0-1062.1.2.el7.x86_64 auid=4294967295 pid=705 uid=0 ses=4294967295 res=success"
+    expect="(Right (Entry (DaemonStart) (Message \"audit(1575912248.984:3695):\") [(Op \"start\"),(Ver \"2.8.5\"),(Format \"raw\"),(Kernel \"3.10.0-1062.1.2.el7.x86_64\"),(Auid \"4294967295\"),(Pid \"705\"),(Uid \"0\"),(Ses \"4294967295\"),(Res \"success\")]))"
+

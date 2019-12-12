@@ -5,7 +5,7 @@ function fieldTypes() {
   do
     field=$(echo $entry) 
     fieldType=$(echo $field | sed 's/^./\U&\E/' | sed -E 's/-(.)/\U\1/g' | sed -E 's/_(.)/\U\1/g')
-    echo "  <|> parse$fieldType"
+    echo "  show ($fieldType v) = \"($fieldType \" <> show v <> \")\""
   done
 }
 input_file=$1
