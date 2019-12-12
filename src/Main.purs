@@ -82,7 +82,6 @@ insertWindows filename (Windows.Entry entry) = do
   lift $ pure unit
   where query = Windows.entryQuery (Windows.Entry entry)
 
-
 data Route = InsertLinux Linux.Entry | InsertWindows Windows.Entry
  
 instance showRoute :: Show Route where

@@ -4,6 +4,7 @@ module Linux
  , Message
  , MessageType
  , parseEntry 
+ , entryQueries
  )  where
 
 import Prelude
@@ -520,6 +521,108 @@ parseField = parseA0
   <|> parseUid
   <|> parseVer
 
+fieldName :: Field -> String
+fieldName (A0 _) = "a0"
+fieldName (A1 _) = "a1"
+fieldName (A2 _) = "a2"
+fieldName (A3 _) = "a3"
+fieldName (Acct _) = "acct"
+fieldName (Addr _) = "addr"
+fieldName (Arch _) = "arch"
+fieldName (AuditBacklogLimit _) = "audit_backlog_limit"
+fieldName (AuditFailure _) = "audit_failure"
+fieldName (Auid _) = "auid"
+fieldName (Cmd _) = "cmd"
+fieldName (Comm _) = "comm"
+fieldName (Dev _) = "dev"
+fieldName (Egid _) = "egid"
+fieldName (Entries _) = "entries"
+fieldName (Euid _) = "euid"
+fieldName (Exe _) = "exe"
+fieldName (Exit _) = "exit"
+fieldName (Family _) = "family"
+fieldName (Format _) = "format"
+fieldName (Fsgid _) = "fsgid"
+fieldName (Fsuid _) = "fsuid"
+fieldName (Gid _) = "gid"
+fieldName (Grantors _) = "grantors"
+fieldName (Hostname _) = "hostname"
+fieldName (Items _) = "items"
+fieldName (Kernel _) = "kernel"
+fieldName (Key _) = "key"
+fieldName (NewLevel _) = "new-level"
+fieldName (Old _) = "old"
+fieldName (OldAuid _) = "old-auid"
+fieldName (OldSes _) = "old-ses"
+fieldName (OldProm _) = "old_prom"
+fieldName (Op _) = "op"
+fieldName (Pid _) = "pid"
+fieldName (Ppid _) = "ppid"
+fieldName (Proctitle _) = "proctitle"
+fieldName (Prom _) = "prom"
+fieldName (Res _) = "res"
+fieldName (Ses _) = "ses"
+fieldName (Sgid _) = "sgid"
+fieldName (Success _) = "success"
+fieldName (Suid _) = "suid"
+fieldName (Syscall _) = "syscall"
+fieldName (Table _) = "table"
+fieldName (Terminal _) = "terminal"
+fieldName (Tty _) = "tty"
+fieldName (Uid _) = "uid"
+fieldName (Ver _) = "ver"
+
+fieldValue :: Field -> String
+fieldValue (A0 v) = v
+fieldValue (A1 v) = v
+fieldValue (A2 v) = v
+fieldValue (A3 v) = v
+fieldValue (Acct v) = v
+fieldValue (Addr v) = v
+fieldValue (Arch v) = v
+fieldValue (AuditBacklogLimit v) = v
+fieldValue (AuditFailure v) = v
+fieldValue (Auid v) = v
+fieldValue (Cmd v) = v
+fieldValue (Comm v) = v
+fieldValue (Dev v) = v
+fieldValue (Egid v) = v
+fieldValue (Entries v) = v
+fieldValue (Euid v) = v
+fieldValue (Exe v) = v
+fieldValue (Exit v) = v
+fieldValue (Family v) = v
+fieldValue (Format v) = v
+fieldValue (Fsgid v) = v
+fieldValue (Fsuid v) = v
+fieldValue (Gid v) = v
+fieldValue (Grantors v) = v
+fieldValue (Hostname v) = v
+fieldValue (Items v) = v
+fieldValue (Kernel v) = v
+fieldValue (Key v) = v
+fieldValue (NewLevel v) = v
+fieldValue (Old v) = v
+fieldValue (OldAuid v) = v
+fieldValue (OldSes v) = v
+fieldValue (OldProm v) = v
+fieldValue (Op v) = v
+fieldValue (Pid v) = v
+fieldValue (Ppid v) = v
+fieldValue (Proctitle v) = v
+fieldValue (Prom v) = v
+fieldValue (Res v) = v
+fieldValue (Ses v) = v
+fieldValue (Sgid v) = v
+fieldValue (Success v) = v
+fieldValue (Suid v) = v
+fieldValue (Syscall v) = v
+fieldValue (Table v) = v
+fieldValue (Terminal v) = v
+fieldValue (Tty v) = v
+fieldValue (Uid v) = v
+fieldValue (Ver v) = v
+
 parseFields :: Parser String (List Field)
 parseFields = parseField `sepBy` string " "
 
@@ -531,7 +634,7 @@ parseMessageType = do
   pure ty
   where 
     parseDaemonStart = do
-       _ <- string "DAEMON_START" 
+       _ <- string (messageType DaemonStart)
        pure DaemonStart
 
 parseMessage :: Parser String Message
@@ -544,6 +647,8 @@ parseMessage = do
 data MessageType = DaemonStart
 
 newtype Message = Message String
+
+data FieldEntry = MessageType Message Field
 
 data Entry = Entry MessageType Message (Array Field)
 
@@ -564,6 +669,20 @@ parseEntry = do
   _      <- string " "
   fields <- Array.fromFoldable <$> parseFields
   pure $ Entry ty msg fields 
+
+messageType :: MessageType -> String
+messageType (DaemonStart) = "DAEMON_START"
+
+message :: Message -> String
+message (Message msg) = msg
+
+fieldQuery :: MessageType -> Message -> Field -> String
+fieldQuery ty msg field = "INSERT INTO Linux (MessageType, Message, FieldName, FieldValue) VALUES (" <> values <> ")"
+  where values = "'" <> (messageType ty) <> "','" <> (message msg) <> "','" <> (fieldName field) <> "','" <> (fieldValue field) <> "'" 
+
+entryQueries :: Entry -> Array String
+entryQueries (Entry ty msg fields) = fieldQuery' <$> fields
+  where fieldQuery' = fieldQuery ty msg
 
 test :: Effect Unit
 test = do
