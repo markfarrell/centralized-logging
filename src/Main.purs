@@ -85,11 +85,24 @@ insertLinux entry = \req -> request <$> Linux.entryQueries (UUIDv3.url $ HTTP.me
       lift $ pure unit
     filename = "logs.db"
 
-data Route = InsertLinux Linux.Entry | InsertWindows Windows.Entry | SummaryLinux
+summaryWindows :: DB.Request (Array SQLite3.Row)
+summaryWindows = do
+  database <- DB.connect filename SQLite3.OpenReadWrite
+  rows     <- DB.all query $ database
+  _        <- DB.close database
+  lift $ pure rows
+  where
+    query = "SELECT x.TaskCategory,SUM(y.Entries) AS 'Entries' FROM TaskCategories as x INNER JOIN"
+      <> " (SELECT EventID, COUNT (DISTINCT UUID) as 'Entries' FROM Windows GROUP BY EventID) AS y"
+      <> " ON y.EventID=x.EventID GROUP BY x.TaskCategory ORDER BY x.TaskCategory,y.Entries DESC;" 
+    filename = "logs.db"
+
+data Route = InsertLinux Linux.Entry | InsertWindows Windows.Entry | SummaryWindows
  
 instance showRoute :: Show Route where
-  show (InsertLinux entry) = "InsertLinux (" <> show entry <> ")"
-  show (InsertWindows entry) = "InsertWindows (" <> show entry <> ")"
+  show (InsertLinux entry) = "(InsertLinux " <> show entry <> ")"
+  show (InsertWindows entry) = "(InsertWindows " <> show entry <> ")"
+  show (SummaryWindows) = "(SummaryWindows)"
 
 parseEntryString :: Parser String String
 parseEntryString = do
@@ -115,15 +128,21 @@ parseInsertWindows = do
   entry <- Windows.parseEntry
   pure (InsertWindows entry)
 
-parseRoute :: Parser String Route
-parseRoute = parseInsertLinux <|> parseInsertWindows
+parseSummaryWindows :: Parser String Route
+parseSummaryWindows = do
+  _ <- string "/summary/windows"
+  pure (SummaryWindows)
 
-data ContentType a = TextHTML a
+parseRoute :: Parser String Route
+parseRoute = parseInsertLinux <|> parseInsertWindows <|> parseSummaryWindows
+
+data ContentType a = TextHTML a | TextJSON a
 
 data ResponseType a = Ok (ContentType a) | InternalServerError a | BadRequest String
 
 instance showContentType :: (Show a) => Show (ContentType a) where
   show (TextHTML x) = "TextHTML (" <> show x <> ")"
+  show (TextJSON x) = "TextJSON (" <> show x <> ")"
 
 instance showResponseType :: (Show a) => Show (ResponseType a) where
   show (Ok x)                  = "Ok (" <> show x <> ")"
@@ -158,16 +177,32 @@ runRoute req  = do
         (Right (Tuple rows steps)) -> do
            _ <- audit (Audit.Entry Audit.Success Audit.DatabaseRequest (show steps)) $ req 
            pure $ Ok (TextHTML "")
+    (Right (SummaryWindows)) -> do
+      _ <- audit (Audit.Entry Audit.Success Audit.RoutingRequest (show (SummaryWindows))) $ req
+      result' <- DB.runRequest $ summaryWindows
+      case result' of
+        (Left error)             -> do 
+           _ <- audit (Audit.Entry Audit.Failure Audit.DatabaseRequest (show error)) $ req 
+           pure $ InternalServerError ""
+        (Right (Tuple rows steps)) -> do
+           _ <- log $ show rows
+           _ <- audit (Audit.Entry Audit.Success Audit.DatabaseRequest (show steps)) $ req 
+           pure $ Ok (TextJSON (show rows))
   where filename = "logs.db"
  
-respondResource :: forall a. ResponseType a -> HTTP.ServerResponse -> Aff Unit
-respondResource (Ok (TextHTML _)) = \res -> liftEffect $ do
+respondResource :: ResponseType String -> HTTP.ServerResponse -> Aff Unit
+respondResource (Ok (TextHTML body)) = \res -> liftEffect $ do
   _ <- HTTP.setHeader "Content-Type" "text/html" $ res
   _ <- HTTP.writeHead 200 $ res
   _ <- HTTP.write body $ res
   _ <- HTTP.end $ res
   pure unit
-  where body = ""
+respondResource (Ok (TextJSON body)) = \res -> liftEffect $ do
+  _ <- HTTP.setHeader "Content-Type" "text/json" $ res
+  _ <- HTTP.writeHead 200 $ res
+  _ <- HTTP.write body $ res
+  _ <- HTTP.end $ res
+  pure unit
 respondResource (BadRequest _) = \res -> liftEffect $ do
   _ <- HTTP.writeHead 400 $ res
   _ <- HTTP.end $ res
