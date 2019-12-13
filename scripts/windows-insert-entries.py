@@ -4,7 +4,7 @@ import requests
 filename='data/windows-security-log-sample.csv'
 route='http://0.0.0.0:3000/insert/windows'
 
-with open(, 'rb') as csvfile:
+with open(filename, 'rb') as csvfile:
     reader = csv.reader(csvfile, quotechar='"')
     for row in reader:
         query=','.join(row)
