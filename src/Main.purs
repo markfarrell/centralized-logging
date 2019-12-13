@@ -1,3 +1,4 @@
+
 module Main where 
   
 import Prelude
@@ -30,6 +31,7 @@ import HTTP as HTTP
 import SQLite3 as SQLite3
 import UUIDv3 as UUIDv3
 
+import Audit as Audit
 import Linux as Linux
 import Windows as Windows
 
@@ -39,92 +41,55 @@ foreign import decodeURIComponent :: String -> String
 
 foreign import encodeBase64 :: String -> String
 
-data MessageType = Success | Failure
-
-data MessageID = DatabaseRequest | ResourceRequest | ResourceResponse | RoutingRequest
-
-data Message = Message MessageType MessageID String
-
-instance showMessageType :: Show MessageType where
-  show Success = "SUCCESS"
-  show Failure = "FAILURE"
-
-instance showMessageID :: Show MessageID where
-  show DatabaseRequest = "DATABASE-REQUEST"
-  show ResourceRequest    = "RESOURCE-REQUEST"
-  show ResourceResponse   = "RESOURCE-RESPONSE"
-  show RoutingRequest      = "ROUTING-REQUEST"
-
-instance showMessage :: Show Message where
-  show (Message ty id msg) = "Message " <> show ty <> " " <> show id <> " " <> show msg  
-
 log :: String -> Aff Unit
 log = liftEffect <<< Console.log
 
-audit :: Message -> Aff Unit
-audit message = do
-  result <- try $ DB.runRequest $ insertMessage filename (encodeMessage message)
+audit :: Audit.Entry -> HTTP.IncomingMessage -> Aff Unit
+audit (Audit.Entry eventType eventID msg) = \req -> do
+  result <- try $ DB.runRequest $ insertAudit entry req
   case result of
     (Left error) -> log $ show result
     (Right _)    -> do 
-      case message of
-        (Message Failure _ _) -> log $ show message
-        _                     -> pure unit
+      case entry of
+        (Audit.Entry Audit.Failure _ _) -> log $ show entry
+        _                               -> pure unit
+  where entry = (Audit.Entry eventType eventID (encodeBase64 msg))
+
+insertAudit :: Audit.Entry -> HTTP.IncomingMessage -> DB.Request Unit
+insertAudit entry = \req -> do
+  database <- DB.connect filename SQLite3.OpenReadWrite
+  _ <- DB.all (query req) $ database
+  _ <- DB.close database
+  lift $ pure unit
+  where 
+    query req = Audit.entryQuery (UUIDv3.url $ HTTP.messageURL req) (HTTP.host req) $ entry
+    filename = "audit.db"
+
+insertWindows :: Windows.Entry -> HTTP.IncomingMessage -> DB.Request Unit
+insertWindows entry = \req -> do
+  database <- DB.connect filename SQLite3.OpenReadWrite
+  _ <- DB.all (query req) $ database
+  _ <- DB.close database
+  lift $ pure unit
+  where 
+    query req = Windows.entryQuery (UUIDv3.url $ HTTP.messageURL req) (HTTP.host req) $ entry
+    filename = "logs.db"
+
+insertLinux :: Linux.Entry -> HTTP.IncomingMessage -> Array (DB.Request Unit)
+insertLinux entry = \req -> request <$> Linux.entryQueries (UUIDv3.url $ HTTP.messageURL req) (HTTP.host req) entry
   where
-   encodeMessage (Message ty id msg) = (Message ty id (encodeBase64 msg))
-   filename = "audit.db"
+    request query = do
+      database <- DB.connect filename SQLite3.OpenReadWrite
+      _ <- DB.all query database
+      _ <- DB.close database
+      lift $ pure unit
+    filename = "logs.db"
 
-insertMessage :: String -> Message -> DB.Request Unit
-insertMessage filename (Message ty id msg) = do
-  database <- DB.connect filename SQLite3.OpenReadWrite
-  _ <- DB.all query database
-  _ <- DB.close database
-  lift $ pure unit
-  where query = "INSERT INTO Messages(type,id,msg) VALUES ('" <> show ty <> "','" <> show id  <> "','" <> msg <> "')" 
-
-insertWindows :: String -> HTTP.IncomingMessage -> Windows.Entry -> DB.Request Unit
-insertWindows filename req (Windows.Entry entry) = do
-  database <- DB.connect filename SQLite3.OpenReadWrite
-  _ <- DB.all query database
-  _ <- DB.close database
-  lift $ pure unit
-  where query = Windows.entryQuery (UUIDv3.url $ HTTP.messageURL req) (Windows.Entry entry)
-
-insertLinux' :: String -> String -> DB.Request Unit
-insertLinux' filename query = do
-  database <- DB.connect filename SQLite3.OpenReadWrite
-  _ <- DB.all query database
-  _ <- DB.close database
-  lift $ pure unit
-
-insertLinux :: String -> HTTP.IncomingMessage -> Linux.Entry -> Array (DB.Request Unit)
-insertLinux filename req entry = insertLinux' filename  <$> Linux.entryQueries (UUIDv3.url $ HTTP.messageURL req) entry
-
-data Route = InsertLinux Linux.Entry | InsertWindows Windows.Entry
+data Route = InsertLinux Linux.Entry | InsertWindows Windows.Entry | SummaryLinux
  
 instance showRoute :: Show Route where
   show (InsertLinux entry) = "InsertLinux (" <> show entry <> ")"
   show (InsertWindows entry) = "InsertWindows (" <> show entry <> ")"
-
-parseMessageType :: Parser String MessageType
-parseMessageType = do
-  _ <- string "type"
-  _ <- string "="
-  parseSuccess <|> parseFailure
-  where 
-    parseSuccess = string (show Success) >>= const (pure Success)
-    parseFailure = string (show Failure) >>= const (pure Failure)
-
-parseMessageID :: Parser String MessageID
-parseMessageID = do
-  _ <- string "id"
-  _ <- string "="
-  parseDatabaseRequest <|> parseResourceRequest <|> parseResourceResponse <|> parseRoutingRequest
-  where
-    parseDatabaseRequest = string (show DatabaseRequest) >>= const (pure DatabaseRequest)
-    parseResourceRequest = string (show ResourceRequest) >>= const (pure ResourceRequest)
-    parseResourceResponse = string (show ResourceResponse) >>= const (pure ResourceResponse)
-    parseRoutingRequest = string (show RoutingRequest) >>= const (pure RoutingRequest)
 
 parseEntryString :: Parser String String
 parseEntryString = do
@@ -170,28 +135,28 @@ runRoute req  = do
   result <-  pure $ flip runParser parseRoute (decodeURIComponent $ HTTP.messageURL req) 
   case result of
     (Left error) -> do 
-        _ <- audit $ Message Failure RoutingRequest (show $ Tuple (decodeURIComponent $ HTTP.messageURL req) error)
+        _ <- audit (Audit.Entry Audit.Failure Audit.RoutingRequest (show $ Tuple (decodeURIComponent $ HTTP.messageURL req) error)) $ req
         pure $ BadRequest (HTTP.messageURL req)
     (Right (InsertLinux entry)) -> do
-      _       <- audit $ Message Success RoutingRequest (show (InsertLinux entry))
-      result' <- sequence <$> sequence (DB.runRequest <$> insertLinux filename req entry)
+      _       <- audit (Audit.Entry Audit.Success Audit.RoutingRequest (show (InsertLinux entry))) $ req
+      result' <- sequence <$> sequence (DB.runRequest <$> (insertLinux entry $ req))
       case result' of
         (Left error)             -> do 
-           _ <- audit $ Message Failure DatabaseRequest (show error) 
+           _ <- audit (Audit.Entry Audit.Failure Audit.DatabaseRequest (show error)) $ req 
            pure $ InternalServerError ""
         (Right result'') -> do
            steps <- pure $ fold (snd <$> result'')
-           _     <- audit $ Message Success DatabaseRequest (show steps) 
+           _     <- audit (Audit.Entry Audit.Success Audit.DatabaseRequest (show steps)) $ req 
            pure $ Ok (TextHTML "")
     (Right (InsertWindows entry)) -> do
-      _       <- audit $ Message Success RoutingRequest (show (InsertWindows entry))
-      result' <- DB.runRequest $ insertWindows filename req entry
+      _       <- audit (Audit.Entry Audit.Success Audit.RoutingRequest (show (InsertWindows entry))) $ req
+      result' <- DB.runRequest $ insertWindows entry $ req
       case result' of
         (Left error)             -> do 
-           _ <- audit $ Message Failure DatabaseRequest (show error) 
+           _ <- audit (Audit.Entry Audit.Failure Audit.DatabaseRequest (show error)) $ req 
            pure $ InternalServerError ""
         (Right (Tuple rows steps)) -> do
-           _ <- audit $ Message Success DatabaseRequest (show steps) 
+           _ <- audit (Audit.Entry Audit.Success Audit.DatabaseRequest (show steps)) $ req 
            pure $ Ok (TextHTML "")
   where filename = "logs.db"
  
@@ -223,15 +188,15 @@ consumer = forever $ do
     (HTTP.Request req res) -> do
       routeResult <- lift $ try (runRoute req)
       case routeResult of
-        (Left  error)        -> lift $ audit $ Message Failure ResourceRequest (show error)
+        (Left  error)        -> lift $ audit (Audit.Entry Audit.Failure Audit.ResourceRequest (show error)) $ req
         (Right responseType) -> do
            _ <- case responseType of
-                  (Ok _) -> lift $ audit $ Message Success ResourceRequest (HTTP.messageURL req)
-                  _      -> lift $ audit $ Message Failure ResourceRequest (HTTP.messageURL req)
+                  (Ok _) -> lift $ audit (Audit.Entry Audit.Success Audit.ResourceRequest (HTTP.messageURL req)) $ req
+                  _      -> lift $ audit (Audit.Entry Audit.Failure Audit.ResourceRequest (HTTP.messageURL req)) $ req
            responseResult <- lift $ try (respondResource responseType res)
            case responseResult of
-             (Left error')   -> lift $ audit $ Message Failure ResourceResponse (show error')
-             (Right _)       -> lift $ audit $ Message Success ResourceResponse (show responseType) 
+             (Left error')   -> lift $ audit (Audit.Entry Audit.Failure Audit.ResourceResponse (show error')) $ req
+             (Right _)       -> lift $ audit (Audit.Entry Audit.Success Audit.ResourceResponse (show responseType)) $ req 
 
 process :: HTTP.Server -> Process Aff Unit
 process server = pullFrom consumer $ producer server

@@ -22,6 +22,10 @@ exports.messageURL = function(incomingMessage) {
   return incomingMessage.url;
 };
 
+exports.host = function(incomingMessage) {
+  return incomingMessage.socket.remoteAddress + ":" + incomingMessage.socket.remotePort;
+};
+
 exports.messageHeaders = function(incomingMessage) {
   return incomingMessage.headers;
 };

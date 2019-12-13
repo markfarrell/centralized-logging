@@ -8,6 +8,7 @@ module HTTP
   , listen
   , messageMethod
   , messageURL
+  , host
   , messageHeaders
   , end
   , writeHead
@@ -32,6 +33,8 @@ foreign import listen :: Int -> Server -> Effect Unit
 foreign import messageMethod :: IncomingMessage -> String
 
 foreign import messageURL :: IncomingMessage -> String
+
+foreign import host :: IncomingMessage -> String
 
 foreign import messageHeaders :: IncomingMessage -> MessageHeaders
 
