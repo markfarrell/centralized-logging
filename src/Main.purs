@@ -97,12 +97,23 @@ summaryWindows = do
       <> " ON y.EventID=x.EventID GROUP BY x.TaskCategory ORDER BY x.TaskCategory,y.Entries DESC;" 
     filename = "logs.db"
 
-data Route = InsertLinux Linux.Entry | InsertWindows Windows.Entry | SummaryWindows
+summaryLinux :: DB.Request (Array SQLite3.Row)
+summaryLinux = do
+  database <- DB.connect filename SQLite3.OpenReadWrite
+  rows     <- DB.all query $ database
+  _        <- DB.close database
+  lift $ pure rows
+  where
+    query = "SELECT MessageType, COUNT(DISTINCT UUID) AS Entries FROM Linux GROUP BY MessageType ORDER BY Entries DESC"
+    filename = "logs.db"
+
+data Route = InsertLinux Linux.Entry | InsertWindows Windows.Entry | SummaryWindows | SummaryLinux
  
 instance showRoute :: Show Route where
   show (InsertLinux entry) = "(InsertLinux " <> show entry <> ")"
   show (InsertWindows entry) = "(InsertWindows " <> show entry <> ")"
   show (SummaryWindows) = "(SummaryWindows)"
+  show (SummaryLinux) = "(SummaryLinux)"
 
 parseEntryString :: Parser String String
 parseEntryString = do
@@ -133,8 +144,13 @@ parseSummaryWindows = do
   _ <- string "/summary/windows"
   pure (SummaryWindows)
 
+parseSummaryLinux :: Parser String Route
+parseSummaryLinux = do
+  _ <- string "/summary/linux"
+  pure (SummaryLinux)
+
 parseRoute :: Parser String Route
-parseRoute = parseInsertLinux <|> parseInsertWindows <|> parseSummaryWindows
+parseRoute = parseInsertLinux <|> parseInsertWindows <|> parseSummaryWindows <|> parseSummaryLinux
 
 data ContentType a = TextHTML a | TextJSON a
 
@@ -180,6 +196,17 @@ runRoute req  = do
     (Right (SummaryWindows)) -> do
       _ <- audit (Audit.Entry Audit.Success Audit.RoutingRequest (show (SummaryWindows))) $ req
       result' <- DB.runRequest $ summaryWindows
+      case result' of
+        (Left error)             -> do 
+           _ <- audit (Audit.Entry Audit.Failure Audit.DatabaseRequest (show error)) $ req 
+           pure $ InternalServerError ""
+        (Right (Tuple rows steps)) -> do
+           _ <- log $ show rows
+           _ <- audit (Audit.Entry Audit.Success Audit.DatabaseRequest (show steps)) $ req 
+           pure $ Ok (TextJSON (show rows))
+    (Right (SummaryLinux)) -> do
+      _ <- audit (Audit.Entry Audit.Success Audit.RoutingRequest (show (SummaryLinux))) $ req
+      result' <- DB.runRequest $ summaryLinux
       case result' of
         (Left error)             -> do 
            _ <- audit (Audit.Entry Audit.Failure Audit.DatabaseRequest (show error)) $ req 
