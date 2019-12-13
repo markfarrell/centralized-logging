@@ -22,6 +22,8 @@ import Text.Parsing.Parser (Parser, runParser)
 import Text.Parsing.Parser.Combinators(sepBy)
 import Text.Parsing.Parser.String (string, satisfy)
 
+foreign import escapeString :: String -> String
+
 data Field =
     A0 String
   | A1 String
@@ -72,6 +74,7 @@ data Field =
   | Tty String
   | Uid String
   | Ver String
+  | Msg String
 
 instance showField :: Show Field where
   show (A0 v) = "(A0 " <> show v <> ")"
@@ -123,9 +126,15 @@ instance showField :: Show Field where
   show (Tty v) = "(Tty " <> show v <> ")"
   show (Uid v) = "(Uid " <> show v <> ")"
   show (Ver v) = "(Ver " <> show v <> ")"
+  show (Msg v) = "(Msg " <> show v <> ")"
 
-parseValue :: Parser String String
-parseValue = foldMap singleton <$> many (satisfy $ not <<< eq ' ')
+
+parseMsg :: Parser String Field
+parseMsg = do
+  _ <- string "msg"
+  _ <- string "="
+  v <- parseValue
+  pure (A0 v)
 
 parseA0 :: Parser String Field
 parseA0 = do
@@ -500,10 +509,10 @@ parseField = parseA0
   <|> parseKernel
   <|> parseKey
   <|> parseNewLevel
-  <|> parseOld
   <|> parseOldAuid
   <|> parseOldSes
   <|> parseOldProm
+  <|> parseOld
   <|> parseOp
   <|> parsePid
   <|> parsePpid
@@ -520,6 +529,7 @@ parseField = parseA0
   <|> parseTty
   <|> parseUid
   <|> parseVer
+  <|> parseMsg
 
 fieldName :: Field -> String
 fieldName (A0 _) = "a0"
@@ -571,6 +581,7 @@ fieldName (Terminal _) = "terminal"
 fieldName (Tty _) = "tty"
 fieldName (Uid _) = "uid"
 fieldName (Ver _) = "ver"
+fieldName (Msg _) = "msg"
 
 fieldValue :: Field -> String
 fieldValue (A0 v) = v
@@ -622,20 +633,44 @@ fieldValue (Terminal v) = v
 fieldValue (Tty v) = v
 fieldValue (Uid v) = v
 fieldValue (Ver v) = v
+fieldValue (Msg v) = v
+
+parseValue :: Parser String String
+parseValue = foldMap singleton <$> many (satisfy $ (\c -> not ((eq '+' c) || (eq '\n' c))))
 
 parseFields :: Parser String (List Field)
-parseFields = parseField `sepBy` string " "
+parseFields = parseField `sepBy` string "+"
 
 parseMessageType :: Parser String MessageType
 parseMessageType = do
   _  <- string "type"
   _  <- string "="
-  ty <- parseDaemonStart
+  ty <- parseMessageType' 
   pure ty
   where 
-    parseDaemonStart = do
-       _ <- string (messageType DaemonStart)
-       pure DaemonStart
+    parseMessageType' = parse DaemonStart
+      <|> parse ConfigChange
+      <|> parse SystemBoot
+      <|> parse SystemRunLevel
+      <|> parse ServiceStart
+      <|> parse NetfilterCfg
+      <|> parse SyscallEntry
+      <|> parse ProctitleEntry
+      <|> parse ServiceStop
+      <|> parse UserStart
+      <|> parse UserCmd
+      <|> parse UserEnd
+      <|> parse UserLogin
+      <|> parse UserAcct
+      <|> parse UserAuth
+      <|> parse CredAcq
+      <|> parse CredDisp
+      <|> parse CredRefr
+      <|> parse AnomPromiscuous
+      <|> parse Login
+    parse ty = do
+       _ <- string (messageType ty)
+       pure ty
 
 parseMessage :: Parser String Message
 parseMessage = do
@@ -644,7 +679,27 @@ parseMessage = do
   v  <- parseValue
   pure (Message v)
 
-data MessageType = DaemonStart
+data MessageType =
+    DaemonStart
+  | ConfigChange
+  | SystemBoot
+  | SystemRunLevel
+  | ServiceStart
+  | NetfilterCfg
+  | SyscallEntry
+  | ProctitleEntry
+  | ServiceStop
+  | UserStart
+  | UserCmd
+  | UserEnd
+  | UserLogin
+  | UserAuth
+  | UserAcct
+  | CredAcq
+  | CredDisp
+  | CredRefr
+  | AnomPromiscuous
+  | Login
 
 newtype Message = Message String
 
@@ -654,6 +709,25 @@ data Entry = Entry MessageType Message (Array Field)
 
 instance showMessageType :: Show MessageType where
   show (DaemonStart) = "(DaemonStart)"
+  show (ConfigChange) = "(ConfigChange)"
+  show (SystemBoot)   = "(SystemBoot)"
+  show (ServiceStart) = "(ServiceStart)"
+  show (SystemRunLevel) = "(SystemRunLevel)"
+  show (NetfilterCfg) = "(NetfilterCfg)"
+  show (SyscallEntry) = "(SyscallEntry)"
+  show (ProctitleEntry) = "(ProctitleEntry)"
+  show (ServiceStop) = "(ServiceStop)"
+  show (UserStart) = "(UserStart)"
+  show (UserCmd) = "(UserCmd)"
+  show (UserEnd) = "(UserEnd)"
+  show (UserLogin) = "(UserLogin)"
+  show (UserAuth) = "(UserAuth)"
+  show (UserAcct) = "(UserAcct)"
+  show (CredAcq) = "(CredAcq)"
+  show (CredDisp) = "(CredDisp)"
+  show (CredRefr) = "(CredRefr)"
+  show (AnomPromiscuous) = "(AnomPromiscuous)"
+  show (Login) = "(Login)"
 
 instance showMessage :: Show Message where
   show (Message x) = "(Message " <> show x <> ")"
@@ -664,21 +738,40 @@ instance showEntry :: Show Entry where
 parseEntry :: Parser String Entry
 parseEntry = do
   ty     <- parseMessageType
-  _      <- string " "
+  _      <- string "+"
   msg    <- parseMessage
-  _      <- string " "
+  _      <- string "+"
   fields <- Array.fromFoldable <$> parseFields
   pure $ Entry ty msg fields 
 
 messageType :: MessageType -> String
 messageType (DaemonStart) = "DAEMON_START"
+messageType (ConfigChange) = "CONFIG_CHANGE"
+messageType (SystemBoot) = "SYSTEM_BOOT"
+messageType (SystemRunLevel) = "SYSTEM_RUNLEVEL"
+messageType (ServiceStart) = "SERVICE_START"
+messageType (NetfilterCfg) = "NETFILTER_CFG"
+messageType (SyscallEntry) = "SYSCALL"
+messageType (ProctitleEntry) = "PROCTITLE"
+messageType (ServiceStop) = "SERVICE_STOP"
+messageType (UserStart) = "USER_START"
+messageType (UserCmd) = "USER_CMD"
+messageType (UserEnd) = "USER_END"
+messageType (UserAuth) = "USER_AUTH"
+messageType (UserAcct) = "USER_ACCT"
+messageType (UserLogin) = "USER_LOGIN"
+messageType (CredAcq) = "CRED_ACQ"
+messageType (CredDisp) = "CRED_DISP"
+messageType (CredRefr) = "CRED_REFR"
+messageType (AnomPromiscuous) = "ANOM_PROMISCUOUS"
+messageType (Login) = "LOGIN"
 
 message :: Message -> String
 message (Message msg) = msg
 
 fieldQuery :: MessageType -> Message -> Field -> String
 fieldQuery ty msg field = "INSERT INTO Linux (MessageType, Message, FieldName, FieldValue) VALUES (" <> values <> ")"
-  where values = "'" <> (messageType ty) <> "','" <> (message msg) <> "','" <> (fieldName field) <> "','" <> (fieldValue field) <> "'" 
+  where values = "'" <> (messageType ty) <> "','" <> (message msg) <> "','" <> (fieldName field) <> "','" <> (escapeString <<< fieldValue $ field) <> "'" 
 
 entryQueries :: Entry -> Array String
 entryQueries (Entry ty msg fields) = fieldQuery' <$> fields

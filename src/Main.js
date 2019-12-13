@@ -17,6 +17,5 @@ exports.decodeURIComponent = function(uriComponent) {
 };
 
 exports.encodeBase64 = function(msg) {
-  var buffer = new Buffer(msg);
-  return buffer.toString("base64");
+  return Buffer.from(msg).toString("base64");
 };
