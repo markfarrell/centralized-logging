@@ -28,6 +28,7 @@ import Text.Parsing.Parser.String (string, anyChar)
 import DB as DB
 import HTTP as HTTP
 import SQLite3 as SQLite3
+import UUIDv3 as UUIDv3
 
 import Linux as Linux
 import Windows as Windows
@@ -81,13 +82,13 @@ insertMessage filename (Message ty id msg) = do
   lift $ pure unit
   where query = "INSERT INTO Messages(type,id,msg) VALUES ('" <> show ty <> "','" <> show id  <> "','" <> msg <> "')" 
 
-insertWindows :: String -> Windows.Entry -> DB.Request Unit
-insertWindows filename (Windows.Entry entry) = do
+insertWindows :: String -> HTTP.IncomingMessage -> Windows.Entry -> DB.Request Unit
+insertWindows filename req (Windows.Entry entry) = do
   database <- DB.connect filename SQLite3.OpenReadWrite
   _ <- DB.all query database
   _ <- DB.close database
   lift $ pure unit
-  where query = Windows.entryQuery (Windows.Entry entry)
+  where query = Windows.entryQuery (UUIDv3.url $ HTTP.messageURL req) (Windows.Entry entry)
 
 insertLinux' :: String -> String -> DB.Request Unit
 insertLinux' filename query = do
@@ -96,8 +97,8 @@ insertLinux' filename query = do
   _ <- DB.close database
   lift $ pure unit
 
-insertLinux :: String -> Linux.Entry -> Array (DB.Request Unit)
-insertLinux filename entry = insertLinux' filename <$> Linux.entryQueries entry
+insertLinux :: String -> HTTP.IncomingMessage -> Linux.Entry -> Array (DB.Request Unit)
+insertLinux filename req entry = insertLinux' filename  <$> Linux.entryQueries (UUIDv3.url $ HTTP.messageURL req) entry
 
 data Route = InsertLinux Linux.Entry | InsertWindows Windows.Entry
  
@@ -173,7 +174,7 @@ runRoute req  = do
         pure $ BadRequest (HTTP.messageURL req)
     (Right (InsertLinux entry)) -> do
       _       <- audit $ Message Success RoutingRequest (show (InsertLinux entry))
-      result' <- sequence <$> sequence (DB.runRequest <$> insertLinux filename entry)
+      result' <- sequence <$> sequence (DB.runRequest <$> insertLinux filename req entry)
       case result' of
         (Left error)             -> do 
            _ <- audit $ Message Failure DatabaseRequest (show error) 
@@ -184,7 +185,7 @@ runRoute req  = do
            pure $ Ok (TextHTML "")
     (Right (InsertWindows entry)) -> do
       _       <- audit $ Message Success RoutingRequest (show (InsertWindows entry))
-      result' <- DB.runRequest $ insertWindows filename entry
+      result' <- DB.runRequest $ insertWindows filename req entry
       case result' of
         (Left error)             -> do 
            _ <- audit $ Message Failure DatabaseRequest (show error) 

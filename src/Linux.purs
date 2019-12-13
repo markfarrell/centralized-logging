@@ -769,13 +769,13 @@ messageType (Login) = "LOGIN"
 message :: Message -> String
 message (Message msg) = msg
 
-fieldQuery :: MessageType -> Message -> Field -> String
-fieldQuery ty msg field = "INSERT INTO Linux (MessageType, Message, FieldName, FieldValue) VALUES (" <> values <> ")"
-  where values = "'" <> (messageType ty) <> "','" <> (message msg) <> "','" <> (fieldName field) <> "','" <> (escapeString <<< fieldValue $ field) <> "'" 
+fieldQuery :: String -> MessageType -> Message -> Field -> String
+fieldQuery uuid ty msg field = "INSERT INTO Linux (UUID, MessageType, Message, FieldName, FieldValue) VALUES (" <> values <> ")"
+  where values = "'" <> uuid <> "','" <> (messageType ty) <> "','" <> (message msg) <> "','" <> (fieldName field) <> "','" <> (escapeString <<< fieldValue $ field) <> "'" 
 
-entryQueries :: Entry -> Array String
-entryQueries (Entry ty msg fields) = fieldQuery' <$> fields
-  where fieldQuery' = fieldQuery ty msg
+entryQueries :: String -> Entry -> Array String
+entryQueries uuid (Entry ty msg fields) = fieldQuery' <$> fields
+  where fieldQuery' = fieldQuery uuid ty msg
 
 test :: Effect Unit
 test = do
